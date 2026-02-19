@@ -46,140 +46,171 @@ class _SimulationScreenState extends State<SimulationScreen> {
     // Přistupujeme k GridModelu (pouze pro čtení / zobrazení)
     final gridModel = Provider.of<GridModel>(context);
 
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Padding(
-            padding: EdgeInsets.all(16.0),
-            child: Text(
-              'Simulace (Náhled)',
-              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-            ),
-          ),
-          Expanded(
-            child: Center(
+    // Sidebar s ovládáním
+    final controlPanel = Container(
+      width: 280,
+      padding: const EdgeInsets.all(16.0),
+      color: Theme.of(context).colorScheme.surfaceContainerLow,
+      child: Consumer<SimulationEngine>(
+        builder: (context, engine, child) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('Ovládání', style: Theme.of(context).textTheme.titleLarge),
+              const SizedBox(height: 16),
+
+              // Karta: Stav simulace
+              Card(
+                color: engine.isRunning
+                    ? Theme.of(context).colorScheme.primaryContainer
+                    : Theme.of(context).colorScheme.surfaceContainerHigh,
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    children: [
+                      Icon(
+                        engine.isRunning
+                            ? Icons.timelapse
+                            : Icons.pause_circle_filled,
+                        size: 48,
+                        color: engine.isRunning
+                            ? Theme.of(context).colorScheme.onPrimaryContainer
+                            : Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        engine.isRunning ? 'Běží' : 'Pozastaveno',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      const SizedBox(height: 16),
+                      FilledButton.icon(
+                        onPressed: engine.toggleSimulation,
+                        icon: Icon(
+                          engine.isRunning ? Icons.pause : Icons.play_arrow,
+                        ),
+                        label: Text(engine.isRunning ? 'Pauza' : 'Spustit'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // Karta: Rychlost
+              Text('Rychlost: ${engine.speedFactor}x'),
+              Slider(
+                value: engine.speedFactor.toDouble(),
+                min: 1,
+                max: 20,
+                divisions: 19,
+                label: '${engine.speedFactor}x',
+                onChanged: (val) => engine.setSpeedFactor(val.toInt()),
+              ),
+              const SizedBox(height: 8),
+
+              // Karta: Venkovní teplota
+              Text(
+                'Venkovní teplota: ${engine.outdoorTemp.toStringAsFixed(1)}°C',
+              ),
+              Slider(
+                value: engine.outdoorTemp,
+                min: -20,
+                max: 40,
+                divisions: 60,
+                label: '${engine.outdoorTemp.toStringAsFixed(1)}°C',
+                onChanged: engine.setOutdoorTemp,
+              ),
+              const SizedBox(height: 16),
+
+              const Divider(),
+
+              // Přepínače
+              SwitchListTile(
+                title: const Text('Zobrazit hodnoty'),
+                value: _showValues,
+                onChanged: (val) {
+                  setState(() {
+                    _showValues = val;
+                  });
+                },
+                contentPadding: EdgeInsets.zero,
+              ),
+
+              const Spacer(),
+
+              // Tip
+              Card(
+                color: Theme.of(context).colorScheme.tertiaryContainer,
+                child: Padding(
+                  padding: const EdgeInsets.all(12.0),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.touch_app,
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.onTertiaryContainer,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Tip: Ťukněte na místnost pro nastavení teploty.',
+                          style: TextStyle(
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.onTertiaryContainer,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    return Row(
+      children: [
+        Expanded(
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
               child: AspectRatio(
                 aspectRatio: 1.0,
-                child: InteractiveViewer(
-                  transformationController: _transformationController,
-                  boundaryMargin: const EdgeInsets.all(double.infinity),
-                  minScale: 0.5,
-                  maxScale: 20.0, // Zvýšeno pro lepší zoom na text
-                  // V simulaci chceme jen prohlížet, ne kreslit, ale ťuknutí vyvolá nastavení zóny
-                  child: GestureDetector(
-                    key: _gridKey,
-                    onTapUp: (details) =>
-                        _handleTap(details.localPosition, gridModel),
-                    child: CustomPaint(
-                      painter: GridPainter(
-                        grid: gridModel,
-                        showTemperatureValues: _showValues,
-                        zoomScale: _currentScale,
+                child: Card(
+                  elevation: 4,
+                  clipBehavior: Clip.antiAlias,
+                  child: InteractiveViewer(
+                    transformationController: _transformationController,
+                    boundaryMargin: const EdgeInsets.all(double.infinity),
+                    minScale: 0.5,
+                    maxScale: 20.0,
+                    child: GestureDetector(
+                      key: _gridKey,
+                      onTapUp: (details) =>
+                          _handleTap(details.localPosition, gridModel),
+                      child: CustomPaint(
+                        painter: GridPainter(
+                          grid: gridModel,
+                          showTemperatureValues: _showValues,
+                          zoomScale: _currentScale,
+                        ),
+                        size: Size.infinite,
                       ),
-                      size: Size.infinite,
                     ),
                   ),
                 ),
               ),
             ),
           ),
-
-          // Ovládací panel
-          Container(
-            padding: const EdgeInsets.all(16.0),
-            color: Colors.grey[200],
-            child: Consumer<SimulationEngine>(
-              builder: (context, engine, child) {
-                return Column(
-                  children: [
-                    // Start / Stop
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        ElevatedButton.icon(
-                          onPressed: engine.toggleSimulation,
-                          icon: Icon(
-                            engine.isRunning ? Icons.pause : Icons.play_arrow,
-                          ),
-                          label: Text(engine.isRunning ? 'Pauza' : 'Spustit'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: engine.isRunning
-                                ? Colors.orange
-                                : Colors.green,
-                            foregroundColor: Colors.white,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-
-                    const Text(
-                      'Tip: Ťukněte na místnost pro nastavení teploty',
-                      style: TextStyle(fontStyle: FontStyle.italic),
-                    ),
-                    const SizedBox(height: 10),
-
-                    // Rychlost
-                    Row(
-                      children: [
-                        const Text('Rychlost:'),
-                        Expanded(
-                          child: Slider(
-                            value: engine.speedFactor.toDouble(),
-                            min: 1,
-                            max: 20,
-                            divisions: 19,
-                            label: '${engine.speedFactor}x',
-                            onChanged: (val) =>
-                                engine.setSpeedFactor(val.toInt()),
-                          ),
-                        ),
-                        Text('${engine.speedFactor}x'),
-                      ],
-                    ),
-
-                    // Venkovní teplota
-                    Row(
-                      children: [
-                        const Text('Venku:'),
-                        Expanded(
-                          child: Slider(
-                            value: engine.outdoorTemp,
-                            min: -20,
-                            max: 40,
-                            divisions: 60,
-                            label: '${engine.outdoorTemp.toStringAsFixed(1)}°C',
-                            onChanged: engine.setOutdoorTemp,
-                          ),
-                        ),
-                        Text('${engine.outdoorTemp.toStringAsFixed(1)}°C'),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-
-                    // Přepínač zobrazení hodnot
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text('Zobrazit hodnoty:'),
-                        Switch(
-                          value: _showValues,
-                          onChanged: (val) {
-                            setState(() {
-                              _showValues = val;
-                            });
-                          },
-                        ),
-                      ],
-                    ),
-                  ],
-                );
-              },
-            ),
-          ),
-        ],
-      ),
+        ),
+        const VerticalDivider(width: 1),
+        controlPanel,
+      ],
     );
   }
 

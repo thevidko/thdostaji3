@@ -1,0 +1,40 @@
+name: Build and Release Windows
+on:
+  push:
+    branches: [main, master] # Spustí se při pushi do hlavní větve
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: "stable"
+          cache: true # Zrychlí další buildy
+
+      - name: Enable Windows Desktop
+        run: flutter config --enable-windows-desktop
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Build Windows
+        run: flutter build windows --release
+
+      - name: Archive Release
+        uses: thedoctor0/zip-release@main
+        with:
+          type: "zip"
+          filename: "heat_simulator_windows.zip"
+          # Cesta k build výstupu
+          directory: "build/windows/runner/Release"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-binary
+          path: build/windows/runner/Release/heat_simulator_windows.zip

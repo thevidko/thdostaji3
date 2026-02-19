@@ -24,186 +24,265 @@ class _EditorScreenState extends State<EditorScreen> {
     // Přistupujeme k GridModelu
     final gridModel = Provider.of<GridModel>(context);
 
-    return Row(
-      children: [
-        // --- Levý panel s nástroji ---
-        Container(
-          width: 200,
-          color: Colors.grey[200],
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Nástroje',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 10),
-              // --- Přepínač režimů (Kreslit / Kyblík / Posun) ---
-              Row(
+    // Sidebar s nástroji
+    final toolsPanel = Container(
+      width: 280,
+      padding: const EdgeInsets.all(8.0),
+      color: Theme.of(context).colorScheme.surfaceContainerLow,
+      child: Column(
+        children: [
+          // Sekce: Soubor
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(8.0),
+              child: Column(
                 children: [
-                  Expanded(
-                    child: _buildModeButton(Icons.edit, EditorMode.draw),
+                  const Text(
+                    'Soubor',
+                    style: TextStyle(fontWeight: FontWeight.bold),
                   ),
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: _buildModeButton(
-                      Icons.format_color_fill,
-                      EditorMode.fill,
-                    ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: FilledButton.tonalIcon(
+                          onPressed: () async {
+                            await gridModel.saveGrid();
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Mřížka uložena!'),
+                                ),
+                              );
+                            }
+                          },
+                          icon: const Icon(Icons.save),
+                          label: const Text('Uložit'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: FilledButton.tonalIcon(
+                          onPressed: () async {
+                            await gridModel.loadGrid();
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Mřížka načtena!'),
+                                ),
+                              );
+                            }
+                          },
+                          icon: const Icon(Icons.folder_open),
+                          label: const Text('Načíst'),
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: _buildModeButton(Icons.pan_tool, EditorMode.move),
+                  const SizedBox(height: 8),
+                  OutlinedButton.icon(
+                    onPressed: () => gridModel.reset(),
+                    icon: const Icon(Icons.delete_forever),
+                    label: const Text('Vymazat vše'),
                   ),
                 ],
               ),
-              const SizedBox(height: 20),
-              _buildToolButton(MaterialType.wall, 'Zeď', Icons.gite_rounded),
-              _buildToolButton(MaterialType.floor, 'Podlaha', Icons.grid_view),
-              _buildToolButton(
-                MaterialType.insulation,
-                'Izolace',
-                Icons.layers,
-              ),
-              _buildToolButton(
-                MaterialType.heater,
-                'Zdroj tepla',
-                Icons.fireplace,
-              ),
-              _buildToolButton(
-                MaterialType.thermostat,
-                'Termostat',
-                Icons.thermostat,
-              ),
-              _buildToolButton(
-                MaterialType.air,
-                'Vzduch (Guma)',
-                Icons.cleaning_services,
-              ),
-              const Spacer(), // Odsune tlačítka dolů
-              // --- Ovládání velikosti mřížky ---
-              const Text('Velikost mřížky:'),
-              Slider(
-                value: gridModel.gridSize.toDouble(),
-                min: 10,
-                max: 100,
-                divisions: 90,
-                label: gridModel.gridSize.toString(),
-                onChanged: (value) {
-                  gridModel.setGridSize(value.toInt());
-                },
-              ),
-              Text(
-                '${gridModel.gridSize} x ${gridModel.gridSize}',
-                style: const TextStyle(fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 20),
+            ),
+          ),
+          const SizedBox(height: 8),
 
-              // --- Ukládání / Načítání ---
-              Row(
-                children: [
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: () async {
-                        await gridModel.saveGrid();
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Mřížka uložena!')),
-                          );
-                        }
-                      },
-                      child: const Text('Uložit'),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: () async {
-                        await gridModel.loadGrid();
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Mřížka načtena!')),
-                          );
-                        }
-                      },
-                      child: const Text('Načíst'),
-                    ),
-                  ),
-                ],
+          // Sekce: Režim
+          const Text('Režim', style: TextStyle(fontWeight: FontWeight.bold)),
+          const SizedBox(height: 4),
+          SegmentedButton<EditorMode>(
+            segments: const [
+              ButtonSegment(
+                value: EditorMode.draw,
+                icon: Icon(Icons.edit),
+                label: Text('Kreslit'),
               ),
-              const SizedBox(height: 10),
-
-              ElevatedButton(
-                onPressed: () {
-                  gridModel.reset(); // Resetuje celou mřížku
-                },
-                child: const Text('Vymazat vše'),
+              ButtonSegment(
+                value: EditorMode.fill,
+                icon: Icon(Icons.format_color_fill),
+                label: Text('Výplň'),
+              ),
+              ButtonSegment(
+                value: EditorMode.move,
+                icon: Icon(Icons.pan_tool),
+                label: Text('Posun'),
               ),
             ],
+            selected: {_mode},
+            onSelectionChanged: (Set<EditorMode> newSelection) {
+              setState(() {
+                _mode = newSelection.first;
+              });
+            },
+            showSelectedIcon: false,
           ),
-        ),
-        // --- Kreslicí plátno ---
+          const SizedBox(height: 16),
+
+          // Sekce: Materiály
+          const Text(
+            'Materiály',
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 4),
+          Expanded(
+            child: ListView(
+              children: [
+                _buildToolTile(MaterialType.wall, 'Zeď', Icons.gite_rounded),
+                _buildToolTile(
+                  MaterialType.floor,
+                  'Podlaha (Zóna)',
+                  Icons.grid_view,
+                ),
+                _buildToolTile(
+                  MaterialType.insulation,
+                  'Izolace',
+                  Icons.layers,
+                ),
+                _buildToolTile(
+                  MaterialType.heater,
+                  'Zdroj tepla',
+                  Icons.fireplace,
+                ),
+                _buildToolTile(
+                  MaterialType.thermostat,
+                  'Termostat',
+                  Icons.thermostat,
+                ),
+                _buildToolTile(
+                  MaterialType.air,
+                  'Vzduch (Guma)',
+                  Icons.cleaning_services,
+                ),
+              ],
+            ),
+          ),
+
+          // Sekce: Velikost
+          const Divider(),
+          Text('Velikost: ${gridModel.gridSize}x${gridModel.gridSize}'),
+          Slider(
+            value: gridModel.gridSize.toDouble(),
+            min: 10,
+            max: 100,
+            divisions: 90,
+            onChanged: (v) => gridModel.setGridSize(v.toInt()),
+          ),
+        ],
+      ),
+    );
+
+    return Row(
+      children: [
+        // Sidebar vlevo (nebo vpravo? User: "Nástroje vpravo"? Plan: "Sidebar (Right)". Wait.
+        // Plan said: "Editor Screen: Move tool palette to a dedicated Right Sidebar."
+        // So I should put Expanded(Grid) FIRST, then Sidebar.
         Expanded(
           child: Center(
-            child: AspectRatio(
-              aspectRatio: 1.0, // Čtvercové plátno
-              child: InteractiveViewer(
-                transformationController: _transformationController,
-                panEnabled: _mode == EditorMode.move,
-                scaleEnabled: _mode == EditorMode.move,
-                minScale: 0.5,
-                maxScale: 5.0,
-                boundaryMargin: const EdgeInsets.all(double.infinity),
-                child: GestureDetector(
-                  key: _gridKey,
-                  // Gesta pro kreslení a vyplňování
-                  onPanStart: _mode == EditorMode.draw
-                      ? (details) =>
-                            _handlePan(details.localPosition, gridModel)
-                      : null,
-                  onPanUpdate: _mode == EditorMode.draw
-                      ? (details) =>
-                            _handlePan(details.localPosition, gridModel)
-                      : null,
-                  onTapUp: _mode == EditorMode.fill
-                      ? (details) =>
-                            _handleFill(details.localPosition, gridModel)
-                      : (_mode ==
-                                EditorMode
-                                    .draw // Povolíme i ťuknutí pro kreslení tečky
-                            ? (details) =>
-                                  _handlePan(details.localPosition, gridModel)
-                            : null),
-                  child: CustomPaint(
-                    painter: GridPainter(grid: gridModel),
-                    size: Size.infinite,
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: AspectRatio(
+                aspectRatio: 1.0,
+                child: Card(
+                  elevation: 4,
+                  clipBehavior: Clip.antiAlias,
+                  child: InteractiveViewer(
+                    transformationController: _transformationController,
+                    panEnabled: _mode == EditorMode.move,
+                    scaleEnabled: _mode == EditorMode.move,
+                    minScale: 0.5,
+                    maxScale: 5.0,
+                    boundaryMargin: const EdgeInsets.all(double.infinity),
+                    child: GestureDetector(
+                      key: _gridKey,
+                      onPanStart: _mode == EditorMode.draw
+                          ? (details) =>
+                                _handlePan(details.localPosition, gridModel)
+                          : null,
+                      onPanUpdate: _mode == EditorMode.draw
+                          ? (details) =>
+                                _handlePan(details.localPosition, gridModel)
+                          : null,
+                      onTapUp: _mode == EditorMode.fill
+                          ? (details) =>
+                                _handleFill(details.localPosition, gridModel)
+                          : (_mode == EditorMode.draw
+                                ? (details) => _handlePan(
+                                    details.localPosition,
+                                    gridModel,
+                                  )
+                                : null),
+                      child: CustomPaint(
+                        painter: GridPainter(grid: gridModel),
+                        size: Size.infinite,
+                      ),
+                    ),
                   ),
                 ),
               ),
             ),
           ),
         ),
+        const VerticalDivider(width: 1),
+        toolsPanel, // Sidebar vpravo
       ],
     );
   }
 
-  // Pomocná metoda pro tlačítka režimů
-  Widget _buildModeButton(IconData icon, EditorMode mode) {
-    final isSelected = _mode == mode;
-    return ElevatedButton(
-      onPressed: () {
-        setState(() {
-          _mode = mode;
-        });
-      },
-      style: ElevatedButton.styleFrom(
-        backgroundColor: isSelected ? Colors.blue : Colors.grey[300],
-        foregroundColor: isSelected ? Colors.white : Colors.black,
-        padding: EdgeInsets.zero,
-        minimumSize: const Size(0, 40), // Výška tlačítka
+  Widget _buildToolTile(MaterialType type, String label, IconData icon) {
+    final isSelected = _selectedTool == type;
+    final colorScheme = Theme.of(context).colorScheme;
+
+    // Určíme barvu pozadí ikony a barvu samotné ikony pro kontrast
+    Color bgColor = type.color;
+    if (type == MaterialType.air) {
+      bgColor = Colors.white; // Pro vzduch/gumu dáme bílé pozadí
+    } else if (type == MaterialType.thermostat) {
+      // Thermostat color might be transparent-ish or specific? Check model.
+      // Default thermostat is usually visible.
+    }
+
+    final iconColor = bgColor.computeLuminance() > 0.5
+        ? Colors.black87
+        : Colors.white;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2.0),
+      child: ListTile(
+        leading: Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            color: bgColor,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.grey.withOpacity(0.5), width: 1),
+          ),
+          child: Icon(icon, color: iconColor, size: 24),
+        ),
+        title: Text(
+          label,
+          style: TextStyle(
+            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+            color: isSelected
+                ? colorScheme.onPrimaryContainer
+                : colorScheme.onSurface,
+          ),
+        ),
+        selected: isSelected,
+        selectedTileColor: colorScheme.primaryContainer,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        onTap: () {
+          setState(() {
+            _selectedTool = type;
+            if (_mode == EditorMode.move) {
+              _mode = EditorMode.draw; // Auto-switch to draw
+            }
+          });
+        },
       ),
-      child: Icon(icon),
     );
   }
 
@@ -221,7 +300,6 @@ class _EditorScreenState extends State<EditorScreen> {
     }
   }
 
-  // Pomocná metoda pro převod souřadnic
   (int?, int?) _getLocalCoordinates(Offset localPosition, GridModel gridModel) {
     final RenderBox? renderBox =
         _gridKey.currentContext?.findRenderObject() as RenderBox?;
@@ -231,24 +309,5 @@ class _EditorScreenState extends State<EditorScreen> {
     final x = (localPosition.dx / cellSize).floor();
     final y = (localPosition.dy / cellSize).floor();
     return (x, y);
-  }
-
-  Widget _buildToolButton(MaterialType type, String label, IconData icon) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4.0),
-      child: ElevatedButton.icon(
-        onPressed: () {
-          setState(() {
-            _selectedTool = type;
-          });
-        },
-        icon: Icon(icon),
-        label: Text(label),
-        style: ElevatedButton.styleFrom(
-          foregroundColor: _selectedTool == type ? Colors.white : null,
-          backgroundColor: _selectedTool == type ? type.color : null,
-        ),
-      ),
-    );
   }
 }
