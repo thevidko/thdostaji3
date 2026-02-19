@@ -12,6 +12,7 @@ class SimulationScreen extends StatefulWidget {
 }
 
 class _SimulationScreenState extends State<SimulationScreen> {
+  final GlobalKey _gridKey = GlobalKey();
   final TransformationController _transformationController =
       TransformationController();
   bool _showValues = false;
@@ -65,19 +66,25 @@ class _SimulationScreenState extends State<SimulationScreen> {
                   boundaryMargin: const EdgeInsets.all(double.infinity),
                   minScale: 0.5,
                   maxScale: 20.0, // Zvýšeno pro lepší zoom na text
-                  // V simulaci chceme jen prohlížet, ne kreslit
-                  child: CustomPaint(
-                    painter: GridPainter(
-                      grid: gridModel,
-                      showTemperatureValues: _showValues,
-                      zoomScale: _currentScale,
+                  // V simulaci chceme jen prohlížet, ne kreslit, ale ťuknutí vyvolá nastavení zóny
+                  child: GestureDetector(
+                    key: _gridKey,
+                    onTapUp: (details) =>
+                        _handleTap(details.localPosition, gridModel),
+                    child: CustomPaint(
+                      painter: GridPainter(
+                        grid: gridModel,
+                        showTemperatureValues: _showValues,
+                        zoomScale: _currentScale,
+                      ),
+                      size: Size.infinite,
                     ),
-                    size: Size.infinite,
                   ),
                 ),
               ),
             ),
           ),
+
           // Ovládací panel
           Container(
             padding: const EdgeInsets.all(16.0),
@@ -104,6 +111,12 @@ class _SimulationScreenState extends State<SimulationScreen> {
                           ),
                         ),
                       ],
+                    ),
+                    const SizedBox(height: 10),
+
+                    const Text(
+                      'Tip: Ťukněte na místnost pro nastavení teploty',
+                      style: TextStyle(fontStyle: FontStyle.italic),
                     ),
                     const SizedBox(height: 10),
 
@@ -143,24 +156,6 @@ class _SimulationScreenState extends State<SimulationScreen> {
                         Text('${engine.outdoorTemp.toStringAsFixed(1)}°C'),
                       ],
                     ),
-
-                    // Cílová teplota (Termostat)
-                    Row(
-                      children: [
-                        const Text('Cíl:'),
-                        Expanded(
-                          child: Slider(
-                            value: engine.targetTemp,
-                            min: 15,
-                            max: 30,
-                            divisions: 30,
-                            label: '${engine.targetTemp.toStringAsFixed(1)}°C',
-                            onChanged: engine.setTargetTemp,
-                          ),
-                        ),
-                        Text('${engine.targetTemp.toStringAsFixed(1)}°C'),
-                      ],
-                    ),
                     const SizedBox(height: 10),
 
                     // Přepínač zobrazení hodnot
@@ -185,6 +180,88 @@ class _SimulationScreenState extends State<SimulationScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  void _handleTap(Offset localPosition, GridModel gridModel) {
+    // Získáme RenderBox pomocí klíče
+    final RenderBox? renderBox =
+        _gridKey.currentContext?.findRenderObject() as RenderBox?;
+
+    if (renderBox == null) return;
+
+    // Dynamický výpočet velikosti buňky podle aktuální velikosti widgetu
+    final double cellSize = renderBox.size.shortestSide / gridModel.gridSize;
+
+    // Převod pixelů na souřadnice buňky
+    final x = (localPosition.dx / cellSize).floor();
+    final y = (localPosition.dy / cellSize).floor();
+
+    final int zoneId = gridModel.getZoneId(x, y);
+
+    if (zoneId > 0) {
+      _showZoneConfigDialog(context, gridModel, zoneId);
+    } else {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Toto není zóna (místnost).'),
+            duration: Duration(milliseconds: 500),
+          ),
+        );
+      }
+    }
+  }
+
+  void _showZoneConfigDialog(
+    BuildContext context,
+    GridModel gridModel,
+    int zoneId,
+  ) {
+    double currentTemp = gridModel.getZoneTargetTemp(zoneId);
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: Text('Nastavení Zóny #$zoneId'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('Cílová teplota: ${currentTemp.toStringAsFixed(1)}°C'),
+                  Slider(
+                    value: currentTemp,
+                    min: 15,
+                    max: 30,
+                    divisions: 30,
+                    label: currentTemp.toStringAsFixed(1),
+                    onChanged: (val) {
+                      setState(() {
+                        currentTemp = val;
+                      });
+                    },
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Zrušit'),
+                ),
+                ElevatedButton(
+                  onPressed: () {
+                    gridModel.setZoneTargetTemp(zoneId, currentTemp);
+                    Navigator.pop(context);
+                  },
+                  child: const Text('Uložit'),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 }

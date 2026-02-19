@@ -20,7 +20,9 @@ extension MaterialTypeExtension on MaterialType {
       case MaterialType.wall:
         return Colors.brown.shade400; // Hnědá pro zeď
       case MaterialType.heater:
-        return Colors.red.shade600; // Červená pro topení
+        return Colors
+            .grey
+            .shade400; // Šedá pro vypnuté topení (zčervená teplem)
       case MaterialType.thermostat:
         return Colors.green.shade400; // Zelená pro termostat
       case MaterialType.insulation:
@@ -35,8 +37,12 @@ class GridModel extends ChangeNotifier {
   int _gridSize;
   // Matice pro teploty
   List<List<double>> _temperatures;
-  // Matice pro typy materiálů (pomocí enum)
+  // Matice pro typy materiálů
   List<List<MaterialType>> _materials;
+  // Matice pro ID zón (0 = žádná zóna, 1+ = číslo zóny)
+  List<List<int>> _zoneIds;
+  // Cílové teploty pro jednotlivé zóny
+  final Map<int, double> _zoneTargetTemps = {};
 
   GridModel(int size)
     : _gridSize = size,
@@ -44,19 +50,107 @@ class GridModel extends ChangeNotifier {
       _materials = List.generate(
         size,
         (_) => List.filled(size, MaterialType.air),
-      );
+      ),
+      _zoneIds = List.generate(size, (_) => List.filled(size, 0));
 
   int get gridSize => _gridSize;
   List<List<double>> get temperatures => _temperatures;
   List<List<MaterialType>> get materials => _materials;
+  List<List<int>> get zoneIds => _zoneIds;
+
+  double getZoneTargetTemp(int zoneId) {
+    if (zoneId <= 0) return 22.0; // Default
+    return _zoneTargetTemps[zoneId] ?? 22.0;
+  }
+
+  void setZoneTargetTemp(int zoneId, double temp) {
+    if (zoneId > 0) {
+      _zoneTargetTemps[zoneId] = temp;
+      notifyListeners();
+    }
+  }
+
+  int getZoneId(int x, int y) {
+    if (x >= 0 && x < _gridSize && y >= 0 && y < _gridSize) {
+      return _zoneIds[y][x];
+    }
+    return 0;
+  }
+
+  // Přepočítá zóny na základě propojení materiálů (Connected Components)
+  // Zóna je tvořena spojitými buňkami typu: Floor, Heater, Thermostat.
+  void recalculateZones() {
+    // Reset zón
+    for (int y = 0; y < _gridSize; y++) {
+      for (int x = 0; x < _gridSize; x++) {
+        _zoneIds[y][x] = 0;
+      }
+    }
+
+    int nextZoneId = 1;
+    final Set<int> activeZones = {};
+
+    for (int y = 0; y < _gridSize; y++) {
+      for (int x = 0; x < _gridSize; x++) {
+        final type = _materials[y][x];
+        // Pokud je to materiál, který tvoří zónu, a ještě nemá ID
+        if (_isZoneMaterial(type) && _zoneIds[y][x] == 0) {
+          _floodFillZone(x, y, nextZoneId);
+          activeZones.add(nextZoneId);
+          nextZoneId++;
+        }
+      }
+    }
+
+    // Vyčistit nastavení pro neexistující zóny (volitelné, garbage collection)
+    _zoneTargetTemps.removeWhere((key, _) => !activeZones.contains(key));
+  }
+
+  bool _isZoneMaterial(MaterialType type) {
+    return type == MaterialType.floor ||
+        type == MaterialType.heater ||
+        type == MaterialType.thermostat;
+  }
+
+  void _floodFillZone(int startX, int startY, int zoneId) {
+    final List<({int x, int y})> queue = [];
+    queue.add((x: startX, y: startY));
+    _zoneIds[startY][startX] = zoneId;
+
+    while (queue.isNotEmpty) {
+      final point = queue.removeLast();
+      final px = point.x;
+      final py = point.y;
+
+      void checkNeighbor(int nx, int ny) {
+        if (nx >= 0 && nx < _gridSize && ny >= 0 && ny < _gridSize) {
+          if (_zoneIds[ny][nx] == 0 && _isZoneMaterial(_materials[ny][nx])) {
+            _zoneIds[ny][nx] = zoneId;
+            queue.add((x: nx, y: ny));
+          }
+        }
+      }
+
+      checkNeighbor(px + 1, py);
+      checkNeighbor(px - 1, py);
+      checkNeighbor(px, py + 1);
+      checkNeighbor(px, py - 1);
+    }
+  }
 
   // Nastaví buňku a upozorní posluchače, aby se překreslili
   void setCell(int x, int y, MaterialType type, {double? temp}) {
     if (x >= 0 && x < _gridSize && y >= 0 && y < _gridSize) {
+      bool typeChanged = _materials[y][x] != type;
       _materials[y][x] = type;
       if (temp != null) {
         _temperatures[y][x] = temp;
       }
+
+      if (typeChanged) {
+        recalculateZones();
+      }
+
       notifyListeners(); // Řekne UI, že se má překreslit
     }
   }
@@ -100,6 +194,7 @@ class GridModel extends ChangeNotifier {
       }
     }
 
+    recalculateZones();
     notifyListeners();
   }
 
@@ -135,6 +230,8 @@ class GridModel extends ChangeNotifier {
       _gridSize,
       (_) => List.filled(_gridSize, MaterialType.air),
     );
+    _zoneIds = List.generate(_gridSize, (_) => List.filled(_gridSize, 0));
+    _zoneTargetTemps.clear();
     notifyListeners();
   }
 
@@ -173,6 +270,7 @@ class GridModel extends ChangeNotifier {
       // Teploty
       _temperatures.add(temperaturesList.sublist(startIndex, endIndex));
     }
+    recalculateZones();
     notifyListeners();
   }
 

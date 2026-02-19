@@ -20,13 +20,9 @@ class SimulationEngine extends ChangeNotifier {
 
   double _outdoorTemp = 0.0;
 
-  // Cílová teplota pro termostaty
-  double _targetTemp = 22.0;
-
   bool get isRunning => _isRunning;
   int get speedFactor => _speedFactor;
   double get outdoorTemp => _outdoorTemp;
-  double get targetTemp => _targetTemp;
 
   SimulationEngine(this.gridModel);
 
@@ -37,11 +33,6 @@ class SimulationEngine extends ChangeNotifier {
 
   void setOutdoorTemp(double temp) {
     _outdoorTemp = temp;
-    notifyListeners();
-  }
-
-  void setTargetTemp(double temp) {
-    _targetTemp = temp;
     notifyListeners();
   }
 
@@ -101,7 +92,7 @@ class SimulationEngine extends ChangeNotifier {
 
         // 1. Zpracování Zdroje tepla
         if (material == gm.MaterialType.heater) {
-          bool shouldHeat = _checkThermostats(temps, materials, size);
+          bool shouldHeat = _shouldHeaterTurnOn(x, y, temps);
           if (shouldHeat) {
             nextTemps[y][x] = 60.0; // Heater topí na fixní teplotu
             continue;
@@ -203,28 +194,32 @@ class SimulationEngine extends ChangeNotifier {
     }
   }
 
-  // Pomocná metoda: Zkontroluje, zda má topit (alespoň jeden termostat hlásí zimu)
-  bool _checkThermostats(
-    List<List<double>> temps,
-    List<List<gm.MaterialType>> materials,
-    int size,
-  ) {
-    bool thermostatFound = false;
+  // Pomocná metoda: Zjistí, zda má topení na dané pozici topit
+  bool _shouldHeaterTurnOn(int x, int y, List<List<double>> temps) {
+    final int myZoneId = gridModel.getZoneId(x, y);
+
+    // Pokud topení není v zóně, netopí (nebo můžeme nechat globální logiku, ale zóny jsou lepší)
+    if (myZoneId == 0) return false;
+
+    final double targetTemp = gridModel.getZoneTargetTemp(myZoneId);
     bool needHeat = false;
 
-    for (int y = 0; y < size; y++) {
-      for (int x = 0; x < size; x++) {
-        if (materials[y][x] == gm.MaterialType.thermostat) {
-          thermostatFound = true;
-          if (temps[y][x] < _targetTemp) {
-            needHeat = true;
+    // Projdeme celou mřížku a hledáme termostaty ve STEJNÉ zóně
+    // (Optimalizace: GridModel by mohl mít seznam termostatů pro každou zónu, ale pro 50x50 to stačí takto)
+    for (int ty = 0; ty < gridModel.gridSize; ty++) {
+      for (int tx = 0; tx < gridModel.gridSize; tx++) {
+        if (gridModel.materials[ty][tx] == gm.MaterialType.thermostat) {
+          if (gridModel.getZoneId(tx, ty) == myZoneId) {
+            // Našli jsme termostat ve stejné zóně
+            if (temps[ty][tx] < targetTemp) {
+              needHeat = true;
+              break; // Stačí jeden termostat, který hlásí zimu
+            }
           }
         }
       }
+      if (needHeat) break;
     }
-
-    // Pokud není termostat, netopíme (nebo topíme pořád? Bezpečnější je netopit).
-    if (!thermostatFound) return false;
 
     return needHeat;
   }
