@@ -23,19 +23,26 @@ jobs:
         run: flutter pub get
 
       - name: Build Windows
-        # Přidali jsme --verbose, aby v logu bylo vidět, pokud build selže
-        run: flutter build windows --release --verbose
+        run: flutter build windows --release
 
-      # TENTO KROK NÁM UKÁŽE, KDE TY SOUBORY JSOU (pro ladění)
-      - name: List files
-        run: dir build/windows/runner/
-        shell: cmd
+      # PowerShell (pwsh) je mnohem odolnější vůči lomítkům
+      - name: List build directory
+        shell: pwsh
+        run: |
+          Get-ChildItem -Path build/windows/ -Recurse -Depth 2
 
-      # Použijeme standardní PowerShell pro vytvoření ZIPu
+      # Automaticky najdeme cestu k Release složce, ať už je v x64 nebo přímo v runner
       - name: Zip Release
         shell: pwsh
         run: |
-          Compress-Archive -Path build/windows/runner/Release/* -DestinationPath heat_simulator_windows.zip
+          $releasePath = Get-ChildItem -Path build/windows/ -Filter "Release" -Recurse | Select-Object -First 1 -ExpandProperty FullName
+          if ($releasePath) {
+            Write-Host "Zipping files from: $releasePath"
+            Compress-Archive -Path "$releasePath\*" -DestinationPath heat_simulator_windows.zip
+          } else {
+            Write-Error "Složka Release nebyla nalezena!"
+            exit 1
+          }
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
