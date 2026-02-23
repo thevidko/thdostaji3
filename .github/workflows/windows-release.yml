@@ -1,7 +1,7 @@
 name: Build and Release Windows
 on:
   push:
-    branches: [main, master] # Spustí se při pushi do hlavní větve
+    branches: [ main, master ]
 
 jobs:
   build:
@@ -13,8 +13,8 @@ jobs:
       - name: Install Flutter
         uses: subosito/flutter-action@v2
         with:
-          channel: "stable"
-          cache: true # Zrychlí další buildy
+          channel: 'stable'
+          cache: true
 
       - name: Enable Windows Desktop
         run: flutter config --enable-windows-desktop
@@ -23,18 +23,22 @@ jobs:
         run: flutter pub get
 
       - name: Build Windows
-        run: flutter build windows --release
+        # Přidali jsme --verbose, aby v logu bylo vidět, pokud build selže
+        run: flutter build windows --release --verbose
 
-      - name: Archive Release
-        uses: thedoctor0/zip-release@main
-        with:
-          type: "zip"
-          filename: "heat_simulator_windows.zip"
-          # Cesta k build výstupu
-          directory: "build/windows/runner/Release"
+      # TENTO KROK NÁM UKÁŽE, KDE TY SOUBORY JSOU (pro ladění)
+      - name: List files
+        run: dir build/windows/runner/
+        shell: cmd
+
+      # Použijeme standardní PowerShell pro vytvoření ZIPu
+      - name: Zip Release
+        shell: pwsh
+        run: |
+          Compress-Archive -Path build/windows/runner/Release/* -DestinationPath heat_simulator_windows.zip
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: windows-binary
-          path: build/windows/runner/Release/heat_simulator_windows.zip
+          path: heat_simulator_windows.zip
