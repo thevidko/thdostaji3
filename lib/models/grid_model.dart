@@ -58,7 +58,13 @@ class GridModel extends ChangeNotifier {
   int get gridSize => _gridSize;
   List<List<double>> get temperatures => _temperatures;
   List<List<MaterialType>> get materials => _materials;
+
+  void updateTemperatures(List<List<double>> newTemps) {
+    _temperatures = newTemps;
+  }
+
   List<List<int>> get zoneIds => _zoneIds;
+  Map<int, double> get zoneTargetTemps => _zoneTargetTemps;
 
   double getZoneTargetTemp(int zoneId) {
     if (zoneId <= 0) return 22.0; // Default
