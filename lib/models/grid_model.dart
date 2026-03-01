@@ -247,10 +247,17 @@ class GridModel extends ChangeNotifier {
 
   // Serializace do JSON
   Map<String, dynamic> toJson() {
+    // Převedeme int klíče na String pro JSON kompatibilitu
+    final Map<String, double> targetTempsJson = {};
+    _zoneTargetTemps.forEach((key, value) {
+      targetTempsJson[key.toString()] = value;
+    });
+
     return {
       'size': _gridSize,
       'materials': _materials.expand((row) => row.map((m) => m.index)).toList(),
       'temperatures': _temperatures.expand((row) => row).toList(),
+      'zoneTargetTemps': targetTempsJson,
     };
   }
 
@@ -264,6 +271,13 @@ class GridModel extends ChangeNotifier {
     _temperatures = [];
     _zoneIds = List.generate(_gridSize, (_) => List.filled(_gridSize, 0));
     _zoneTargetTemps.clear();
+
+    if (json.containsKey('zoneTargetTemps')) {
+      final Map<String, dynamic> targetTempsJson = json['zoneTargetTemps'];
+      targetTempsJson.forEach((key, value) {
+        _zoneTargetTemps[int.parse(key)] = (value as num).toDouble();
+      });
+    }
 
     for (int i = 0; i < _gridSize; i++) {
       final startIndex = i * _gridSize;

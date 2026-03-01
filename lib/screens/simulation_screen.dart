@@ -103,6 +103,13 @@ class _SimulationScreenState extends State<SimulationScreen> {
                   child: Column(
                     children: [
                       Text(
+                        '${engine.currentTime.day}. ${engine.currentTime.month}. ${engine.currentTime.year}',
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(
+                              color: Theme.of(context).colorScheme.primary,
+                            ),
+                      ),
+                      Text(
                         '${engine.currentTime.hour.toString().padLeft(2, '0')}:${engine.currentTime.minute.toString().padLeft(2, '0')}:${engine.currentTime.second.toString().padLeft(2, '0')}',
                         style: Theme.of(context).textTheme.headlineMedium,
                       ),
@@ -146,16 +153,39 @@ class _SimulationScreenState extends State<SimulationScreen> {
               // Odstraněna fyzikální rychlost, ta je nyní dána časem
 
               // Karta: Venkovní teplota
-              Text(
-                'Venkovní teplota: ${engine.outdoorTemp.toStringAsFixed(1)}°C',
-              ),
-              Slider(
-                value: engine.outdoorTemp,
-                min: -20,
-                max: 40,
-                divisions: 60,
-                label: '${engine.outdoorTemp.toStringAsFixed(1)}°C',
-                onChanged: engine.setOutdoorTemp,
+              Card(
+                color: Theme.of(context).colorScheme.tertiaryContainer,
+                child: Padding(
+                  padding: const EdgeInsets.all(12.0),
+                  child: Column(
+                    children: [
+                      const Text(
+                        'Počasí venku',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        '${engine.outdoorTemp.toStringAsFixed(1)} °C',
+                        style: Theme.of(context).textTheme.headlineMedium
+                            ?.copyWith(
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.onTertiaryContainer,
+                            ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Řízeno sezónně s ohledem na čas',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.onTertiaryContainer,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                  ),
+                ),
               ),
               const SizedBox(height: 16),
 
