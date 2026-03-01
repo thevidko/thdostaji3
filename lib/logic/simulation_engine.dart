@@ -12,27 +12,26 @@ class SimulationEngine extends ChangeNotifier {
   Timer? _timer;
   bool _isRunning = false;
 
-  // Rychlost simulace (kolik korků za sekundu, nebo speed factor)
-  // Zde implementujeme "Speed Factor" jako počet updatů za tick timeru,
-  // nebo zkrácení intervalu timeru. Pro plynulost UI je lepší fixní timer
-  // (např. 60 FPS = 16ms) a v něm dělat N kroků simulace.
-  int _speedFactor = 1;
-
   double _outdoorTemp = 0.0;
 
+  // Proměnné pro simulaci času
+  DateTime _currentTime = DateTime(2025, 1, 1, 8, 0); // Výchozí čas 8:00
+  int _timeMultiplier = 60; // 1 min/s jako výchozí
+
   bool get isRunning => _isRunning;
-  int get speedFactor => _speedFactor;
   double get outdoorTemp => _outdoorTemp;
+  DateTime get currentTime => _currentTime;
+  int get timeMultiplier => _timeMultiplier;
 
   SimulationEngine(this.gridModel);
 
-  void setSpeedFactor(int factor) {
-    _speedFactor = factor.clamp(1, 100);
+  void setOutdoorTemp(double temp) {
+    _outdoorTemp = temp;
     notifyListeners();
   }
 
-  void setOutdoorTemp(double temp) {
-    _outdoorTemp = temp;
+  void setTimeMultiplier(int multiplier) {
+    _timeMultiplier = multiplier;
     notifyListeners();
   }
 
@@ -51,17 +50,25 @@ class SimulationEngine extends ChangeNotifier {
 
     // Spustíme timer, např. 30x za sekundu
     _timer = Timer.periodic(const Duration(milliseconds: 33), (timer) {
-      // V každém ticku provedeme _speedFactor kroků simulace
-      for (int i = 0; i < _speedFactor; i++) {
-        _step();
-      }
+      // Reálný uplynulý čas 0.033 s * násobič času
+      final double virtualDtSec = 0.033 * _timeMultiplier;
+
+      // Posun simulovaného času
+      _currentTime = _currentTime.add(
+        Duration(milliseconds: 33 * _timeMultiplier),
+      );
+
+      // Zde v budoucnu budeme volat logiku pro počasí a absenci osob:
+      // _updateEnvironment();
+
+      // Zpracujeme fyziku podle uplynulého virtuálního času
+      _stepVirtualTime(virtualDtSec);
+
       // Notifikujeme UI o změně (překreslení)
-      // Pozor: Pokud je simulace velmi rychlá, může notifyListeners() zahltit UI.
-      // GridModel.notifyListeners() voláme uvnitř _step jen pokud se něco změnilo,
-      // nebo můžeme volat notifyListeners() jen jednou na konci timeru.
       // Zde budeme volat notifyListeners() na GridModelu explicitně,
       // protože GridModel sám o sobě neví že se změnila data v poli (pokud do něj saháme přímo).
       gridModel.notifyListeners();
+      notifyListeners(); // Aby se překreslil i čas v UI
     });
   }
 
@@ -72,8 +79,22 @@ class SimulationEngine extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Jeden krok fyzikální simulace (s tepelnou kapacitou a vodivostí)
-  void _step() {
+  // Zpracování fyziky pro uběhlý simulovaný čas t_virtual.
+  // Pro zachování matematické stability využíváme maximální povolený fyzikální krok (dtThreshold),
+  // a celkový uplynulý čas tak sekáme na dílčí mikro-kroky.
+  void _stepVirtualTime(double virtualDt) {
+    const double dtThreshold =
+        2.0; // Stabilní krok díky novému poměru (zabrání vygenerování NaN u vzduchu)
+    final int steps = (virtualDt / dtThreshold).ceil();
+    final double stepDt = virtualDt / steps;
+
+    for (int i = 0; i < steps; i++) {
+      _computeHeatTransfer(stepDt);
+    }
+  }
+
+  // Jeden fyzikální mikro-krok šíření tepla (s tepelnou kapacitou a vodivostí)
+  void _computeHeatTransfer(double dt) {
     final int size = gridModel.gridSize;
     final temps = gridModel.temperatures;
     final materials = gridModel.materials;
@@ -123,16 +144,16 @@ class SimulationEngine extends ChangeNotifier {
             neighborConductivity = 1.0; // Vzduch venku
           }
 
-          // Efektivní vodivost rozhraní (harmonický průměr nebo min, nebo průměr)
-          // Pro zjednodušení použijeme průměr, nebo pokud je jeden izolant, tak izoluje.
-          // Fyzikálně přesnější pro sériový odpor: 2 / (1/k1 + 1/k2)
+          // Efektivní vodivost rozhraní
+          // Použijeme minimum. Zabrání to matematické chybě a zároveň respektuje fyzikální maximum
+          // bariéry (např. Vzduch a Zeď -> omezí se to zdí. Vzduch a Vzduch -> povalí to na plný výkon konvekce).
           double interfaceConductivity;
           if (myConductivity == 0 || neighborConductivity == 0) {
             interfaceConductivity = 0;
           } else {
-            interfaceConductivity =
-                (2 * myConductivity * neighborConductivity) /
-                (myConductivity + neighborConductivity);
+            interfaceConductivity = myConductivity < neighborConductivity
+                ? myConductivity
+                : neighborConductivity;
           }
 
           // Tok energie
@@ -144,12 +165,7 @@ class SimulationEngine extends ChangeNotifier {
         processNeighbor(x, y + 1);
         processNeighbor(x, y - 1);
 
-        // Změna teploty
-        // Použijeme časový krok (dt) pro stabilitu simulace.
-        // Podmínka stability (CFL): součet (k * dt / C) pro všechny sousedy musí být < 1.
-        // Pro vzduch: k=0.8, C=1.0 -> k/C = 0.8. Sousedů je 4 -> suma = 3.2.
-        // Proto musí být dt < 1/3.2 ~= 0.31.
-        const double dt = 0.2;
+        // Změna teploty (s konkrétním časovým dílkem dt)
         nextTemps[y][x] = currentTemp + (totalFlux * dt / myCapacity);
       }
     }
@@ -166,31 +182,36 @@ class SimulationEngine extends ChangeNotifier {
   double _getConductivity(gm.MaterialType type) {
     switch (type) {
       case gm.MaterialType.air:
+        return 50.0; // Venkovní vzduch (vítr) - okamžité odsátí tepla
       case gm.MaterialType.floor:
-        return 0.8; // Vzduch a podlaha vedou teplo stejně (pro zjednodušení)
+        return 20.0; // Vnitřní prostor místnosti (vzduch uvnitř) - silná konvekce
       case gm.MaterialType.wall:
-        return 0.1; // Zeď vede špatně
+        return 0.2; // Zeď vede pomalu
       case gm.MaterialType.insulation:
-        return 0.01; // Izolace vede velmi špatně
+        return 0.01; // Izolace je nepropustná pečeť
       case gm.MaterialType.heater:
       case gm.MaterialType.thermostat:
-        return 2.0; // Kov vede velmi dobře
+        return 5.0; // Solidní kovový vodič
     }
   }
 
   // Tepelná kapacita (c) - setrvačnost (jak těžké je změnit teplotu)
   double _getCapacity(gm.MaterialType type) {
+    const double m = 1000.0; // Kapacitní násobič pro zamezení nestabilitě
     switch (type) {
       case gm.MaterialType.air:
+        return 1.0 *
+            m; // Venkovní vzduch - chceme, aby hned přebral venkovní teplotu bez setrvačnosti
       case gm.MaterialType.floor:
-        return 1.0; // Vzduch a podlaha mají malou setrvačnost
+        return 5.0 *
+            m; // Vnitřní vzduch je rychlý, ohřev a ochlazení běží svižně (stabilita 5000 / 80 = 62)
       case gm.MaterialType.wall:
-        return 50.0; // Zeď má velkou setrvačnost (cihla)
+        return 50.0 * m; // Zeď má ohromnou setrvačnost, trvá dny ji vyhřát
       case gm.MaterialType.insulation:
-        return 5.0; // Izolace je lehká (vata/polystyren), malá kapacita
+        return 5.0 * m; // Izolace je lehká
       case gm.MaterialType.heater:
       case gm.MaterialType.thermostat:
-        return 10.0; // Kov má střední kapacitu
+        return 10.0 * m; // Kov má střední kapacitu
     }
   }
 

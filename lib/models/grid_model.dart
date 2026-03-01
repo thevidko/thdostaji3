@@ -1,4 +1,6 @@
 import 'dart:convert';
+import 'dart:io';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -254,6 +256,8 @@ class GridModel extends ChangeNotifier {
 
     _materials = [];
     _temperatures = [];
+    _zoneIds = List.generate(_gridSize, (_) => List.filled(_gridSize, 0));
+    _zoneTargetTemps.clear();
 
     for (int i = 0; i < _gridSize; i++) {
       final startIndex = i * _gridSize;
@@ -272,6 +276,47 @@ class GridModel extends ChangeNotifier {
     }
     recalculateZones();
     notifyListeners();
+  }
+
+  // Uložení gridu do vybraného souboru
+  Future<void> saveToFile() async {
+    try {
+      String? outputFile = await FilePicker.platform.saveFile(
+        dialogTitle: 'Uložit mřížku jako...',
+        fileName: 'model.thg',
+        type: FileType.custom,
+        allowedExtensions: ['thg', 'json'],
+      );
+
+      if (outputFile != null) {
+        final file = File(outputFile);
+        final jsonString = jsonEncode(toJson());
+        await file.writeAsString(jsonString);
+      }
+    } catch (e) {
+      debugPrint("Chyba při ukládání souboru: $e");
+      rethrow;
+    }
+  }
+
+  // Načtení gridu z vybraného souboru
+  Future<void> loadFromFile() async {
+    try {
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        dialogTitle: 'Načíst mřížku ze souboru',
+        type: FileType.custom,
+        allowedExtensions: ['thg', 'json'],
+      );
+
+      if (result != null && result.files.single.path != null) {
+        final file = File(result.files.single.path!);
+        final jsonString = await file.readAsString();
+        fromJson(jsonDecode(jsonString));
+      }
+    } catch (e) {
+      debugPrint("Chyba při načítání souboru: $e");
+      rethrow;
+    }
   }
 
   // Uložení gridu do SharedPreferences

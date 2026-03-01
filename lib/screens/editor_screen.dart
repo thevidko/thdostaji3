@@ -47,13 +47,24 @@ class _EditorScreenState extends State<EditorScreen> {
                       Expanded(
                         child: FilledButton.tonalIcon(
                           onPressed: () async {
-                            await gridModel.saveGrid();
-                            if (context.mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Mřížka uložena!'),
-                                ),
-                              );
+                            try {
+                              await gridModel.saveToFile();
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Mřížka úspěšně uložena!'),
+                                  ),
+                                );
+                              }
+                            } catch (e) {
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('Chyba při ukládání: $e'),
+                                    backgroundColor: Colors.red,
+                                  ),
+                                );
+                              }
                             }
                           },
                           icon: const Icon(Icons.save),
@@ -64,13 +75,24 @@ class _EditorScreenState extends State<EditorScreen> {
                       Expanded(
                         child: FilledButton.tonalIcon(
                           onPressed: () async {
-                            await gridModel.loadGrid();
-                            if (context.mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Mřížka načtena!'),
-                                ),
-                              );
+                            try {
+                              await gridModel.loadFromFile();
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Mřížka úspěšně načtena!'),
+                                  ),
+                                );
+                              }
+                            } catch (e) {
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('Chyba při načítání: $e'),
+                                    backgroundColor: Colors.red,
+                                  ),
+                                );
+                              }
                             }
                           },
                           icon: const Icon(Icons.folder_open),
@@ -258,7 +280,10 @@ class _EditorScreenState extends State<EditorScreen> {
           decoration: BoxDecoration(
             color: bgColor,
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.grey.withOpacity(0.5), width: 1),
+            border: Border.all(
+              color: Colors.grey.withValues(alpha: 0.5),
+              width: 1,
+            ),
           ),
           child: Icon(icon, color: iconColor, size: 24),
         ),

@@ -94,19 +94,56 @@ class _SimulationScreenState extends State<SimulationScreen> {
                   ),
                 ),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 8),
 
-              // Karta: Rychlost
-              Text('Rychlost: ${engine.speedFactor}x'),
-              Slider(
-                value: engine.speedFactor.toDouble(),
-                min: 1,
-                max: 20,
-                divisions: 19,
-                label: '${engine.speedFactor}x',
-                onChanged: (val) => engine.setSpeedFactor(val.toInt()),
+              // Karta: Čas simulace
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(12.0),
+                  child: Column(
+                    children: [
+                      Text(
+                        '${engine.currentTime.hour.toString().padLeft(2, '0')}:${engine.currentTime.minute.toString().padLeft(2, '0')}:${engine.currentTime.second.toString().padLeft(2, '0')}',
+                        style: Theme.of(context).textTheme.headlineMedium,
+                      ),
+                      const SizedBox(height: 12),
+                      const Text(
+                        'Rychlost času',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 8),
+                      SegmentedButton<int>(
+                        segments: const [
+                          ButtonSegment(value: 60, label: Text('Min/s')),
+                          ButtonSegment(value: 3600, label: Text('Hod/s')),
+                          ButtonSegment(value: 86400, label: Text('Den/s')),
+                          ButtonSegment(value: 604800, label: Text('Týd/s')),
+                        ],
+                        selected: {
+                          [
+                                60,
+                                3600,
+                                86400,
+                                604800,
+                              ].contains(engine.timeMultiplier)
+                              ? engine.timeMultiplier
+                              : 60,
+                        },
+                        onSelectionChanged: (Set<int> newSelection) {
+                          engine.setTimeMultiplier(newSelection.first);
+                        },
+                        showSelectedIcon: false,
+                        style: const ButtonStyle(
+                          visualDensity: VisualDensity.compact,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
               const SizedBox(height: 8),
+
+              // Odstraněna fyzikální rychlost, ta je nyní dána časem
 
               // Karta: Venkovní teplota
               Text(
