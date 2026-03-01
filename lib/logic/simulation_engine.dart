@@ -90,10 +90,12 @@ class SimulationEngine extends ChangeNotifier {
     if (!_isWorkerReady || _workerSendPort == null) return;
     _workerSendPort!.send(
       WorkerUpdateMapCommand(
+        size: gridModel.gridSize,
         temps: _exportTemps1D(),
         materials: _exportMaterials1D(),
         zoneIds: _exportZoneIds1D(),
         zoneTargetTemps: Map<int, double>.from(gridModel.zoneTargetTemps),
+        zoneSatisfaction: Map<int, double>.from(gridModel.zoneSatisfaction),
       ),
     );
   }
@@ -138,6 +140,7 @@ class SimulationEngine extends ChangeNotifier {
 
     _isUpdatingFromWorker = true;
     gridModel.updateTemperatures(temps2D);
+    gridModel.updateZoneSatisfactions(response.zoneSatisfaction);
     gridModel.notifyListeners();
     _isUpdatingFromWorker = false;
 

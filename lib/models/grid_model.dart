@@ -45,6 +45,8 @@ class GridModel extends ChangeNotifier {
   List<List<int>> _zoneIds;
   // Cílové teploty pro jednotlivé zóny
   final Map<int, double> _zoneTargetTemps = {};
+  // Kumulativní hodnota spokojenosti 0.0 - 1.0 (0% až 100%)
+  final Map<int, double> _zoneSatisfaction = {};
 
   GridModel(int size)
     : _gridSize = size,
@@ -75,6 +77,18 @@ class GridModel extends ChangeNotifier {
     if (zoneId > 0) {
       _zoneTargetTemps[zoneId] = temp;
       notifyListeners();
+    }
+  }
+
+  Map<int, double> get zoneSatisfaction => _zoneSatisfaction;
+
+  double getZoneSatisfaction(int zoneId) {
+    return _zoneSatisfaction[zoneId] ?? 1.0; // Defaultní spokojenost je 100%
+  }
+
+  void updateZoneSatisfactions(Map<int, double> newSatisfactions) {
+    for (final entry in newSatisfactions.entries) {
+      _zoneSatisfaction[entry.key] = entry.value;
     }
   }
 
@@ -112,6 +126,7 @@ class GridModel extends ChangeNotifier {
 
     // Vyčistit nastavení pro neexistující zóny (volitelné, garbage collection)
     _zoneTargetTemps.removeWhere((key, _) => !activeZones.contains(key));
+    _zoneSatisfaction.removeWhere((key, _) => !activeZones.contains(key));
   }
 
   bool _isZoneMaterial(MaterialType type) {
@@ -253,11 +268,17 @@ class GridModel extends ChangeNotifier {
       targetTempsJson[key.toString()] = value;
     });
 
+    final Map<String, double> targetSatisJson = {};
+    _zoneSatisfaction.forEach((key, value) {
+      targetSatisJson[key.toString()] = value;
+    });
+
     return {
       'size': _gridSize,
       'materials': _materials.expand((row) => row.map((m) => m.index)).toList(),
       'temperatures': _temperatures.expand((row) => row).toList(),
       'zoneTargetTemps': targetTempsJson,
+      'zoneSatisfaction': targetSatisJson,
     };
   }
 
@@ -271,11 +292,19 @@ class GridModel extends ChangeNotifier {
     _temperatures = [];
     _zoneIds = List.generate(_gridSize, (_) => List.filled(_gridSize, 0));
     _zoneTargetTemps.clear();
+    _zoneSatisfaction.clear();
 
     if (json.containsKey('zoneTargetTemps')) {
       final Map<String, dynamic> targetTempsJson = json['zoneTargetTemps'];
       targetTempsJson.forEach((key, value) {
         _zoneTargetTemps[int.parse(key)] = (value as num).toDouble();
+      });
+    }
+
+    if (json.containsKey('zoneSatisfaction')) {
+      final Map<String, dynamic> targetSatisJson = json['zoneSatisfaction'];
+      targetSatisJson.forEach((key, value) {
+        _zoneSatisfaction[int.parse(key)] = (value as num).toDouble();
       });
     }
 

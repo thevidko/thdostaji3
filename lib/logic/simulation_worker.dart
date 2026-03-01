@@ -23,16 +23,20 @@ class WorkerInitCommand {
 }
 
 class WorkerUpdateMapCommand {
+  final int size;
   final Float64List temps;
   final Uint8List materials;
   final Int32List zoneIds;
   final Map<int, double> zoneTargetTemps;
+  final Map<int, double> zoneSatisfaction;
 
   WorkerUpdateMapCommand({
+    required this.size,
     required this.temps,
     required this.materials,
     required this.zoneIds,
     required this.zoneTargetTemps,
+    required this.zoneSatisfaction,
   });
 }
 
@@ -51,7 +55,8 @@ class WorkerStepCommand {
 // Zpáteční zpráva
 class WorkerResponse {
   final Float64List temps;
-  WorkerResponse(this.temps);
+  final Map<int, double> zoneSatisfaction;
+  WorkerResponse(this.temps, this.zoneSatisfaction);
 }
 
 // --- Izolát ---
@@ -84,6 +89,7 @@ class SimulationWorkerState {
   Uint8List materials;
   Int32List zoneIds;
   Map<int, double> zoneTargetTemps;
+  Map<int, double> zoneSatisfaction = {};
 
   // Precalculated O(n) maps pro O(1) přístupy do radiátorů
   final Map<int, List<int>> zoneThermostats = {};
@@ -108,7 +114,8 @@ class SimulationWorkerState {
   void _initMaterialProperties() {
     conds[gm.MaterialType.air.index] = 50.0;
     conds[gm.MaterialType.floor.index] = 20.0;
-    conds[gm.MaterialType.wall.index] = 0.5;
+    conds[gm.MaterialType.wall.index] =
+        1.0; // Zvýšeno z 0.5 kvůli lepšímu průniku tepla do nezásobených místností
     conds[gm.MaterialType.insulation.index] = 0.01;
     conds[gm.MaterialType.heater.index] = 5.0;
     conds[gm.MaterialType.thermostat.index] = 50.0;
@@ -123,10 +130,20 @@ class SimulationWorkerState {
   }
 
   void updateMap(WorkerUpdateMapCommand cmd) {
+    if (size != cmd.size) {
+      size = cmd.size;
+      nextTemps = Float64List(size * size);
+    }
     temps = cmd.temps;
     materials = cmd.materials;
     zoneIds = cmd.zoneIds;
     zoneTargetTemps = cmd.zoneTargetTemps;
+
+    // Obnovit jen ty, co přišly z UI, zbytek nechat běžet
+    for (final entry in cmd.zoneSatisfaction.entries) {
+      zoneSatisfaction[entry.key] = entry.value;
+    }
+
     _rebuildZoneLookups();
   }
 
@@ -172,39 +189,63 @@ class SimulationWorkerState {
 
     final int length = size * size;
 
-    // 1D pole zapnutých radiátorů (použijeme bool list nebo byte list?)
-    // Použijeme rovnou Int8List pro extrémní rychlost: 1 = true, 0 = false
-    final Uint8List heatersOn = Uint8List(length);
+    // 1D pole teplot zapnutých radiátorů (Proporcionální řízení)
+    // 0.0 znamená vypnutý radiátor (běžná chladnoucí hmota)
+    final Float64List heaterTargetTemps = Float64List(length);
 
     for (int step = 0; step < steps; step++) {
-      // 1. Zjistit, které radiátory běží (O(n) přes lookup tabulky namísto O(n^4))
-      heatersOn.fillRange(0, length, 0); // Vynulovat
+      // 1. Zjistit, které radiátory běží a na kolik stupňů (O(n) lookup)
+      heaterTargetTemps.fillRange(0, length, 0.0); // Vynulovat
 
       // Procházíme všechny zóny, ve kterých se nachází alespoň jeden radiátor
       for (int zId in zoneHeaters.keys) {
         if (zId == 0) continue;
         final double target = zoneTargetTemps[zId] ?? 22.0;
 
-        // Zkontrolovat termostaty v zóně
-        bool needHeat = false;
         final tList = zoneThermostats[zId];
-        if (tList != null) {
-          for (int tIdx in tList) {
-            if (temps[tIdx] < target) {
-              needHeat = true;
-              break;
-            }
-          }
-        }
+        if (tList != null && tList.isNotEmpty) {
+          // Pro zjednodušení bereme první termostat v zóně
+          final double currentZoneTemp = temps[tList.first];
+          final double diff = target - currentZoneTemp;
 
-        // Zapnout radiátory v zóně
-        if (needHeat) {
-          final hList = zoneHeaters[zId];
-          if (hList != null) {
-            for (int hIdx in hList) {
-              heatersOn[hIdx] = 1;
+          // Proporcionální regulátor (P-Controller) laděný na přesné udržování
+          // Abychom zamezili přetopení (overshootku), nepustíme do topení rovnou 40°C,
+          // když chybí jen desetinka stupně.
+          // Výchozím bodem je samotná cílová teplota (např. 22°C), od které se odpíchneme rasantní křivkou nahoru.
+          if (diff > 0.0) {
+            // Např. chybí 2°C -> 22 + 60 = 82°C (Max limitováno na 60°C).
+            // Chybí 0.5°C -> 22 + 15 = 37°C.
+            // Chybí 0.1°C -> 22 + 3 = 25°C.
+            double heaterTemp = target + (diff * 30.0);
+            if (heaterTemp > 60.0) heaterTemp = 60.0; // Maximální výkon kotle
+
+            final hList = zoneHeaters[zId];
+            if (hList != null) {
+              for (int hIdx in hList) {
+                heaterTargetTemps[hIdx] = heaterTemp;
+              }
             }
           }
+
+          // Výpočet metriky spokojenosti (0.0 to 1.0)
+          // Rychlost poklesu spokojenosti je závislá na odchylce:
+          // tolerance je 0.5 stupně, kde je člověk "maximálně spokojen"
+          double currentSatisfaction = zoneSatisfaction[zId] ?? 1.0;
+          final double absoluteError = diff.abs();
+
+          if (absoluteError <= 0.5) {
+            // Mírně připočítáme regeneraci spokojenosti (0.5% za reálnou 1 vteřinu)
+            currentSatisfaction += stepDt * 0.005;
+          } else {
+            // Odečteme nespokojenost: např. chyba 3°C propálí 10% za zhruba reálnou minutu
+            // Vynásobíme dtSec a penalizačním koeficientem umocněným chybou
+            currentSatisfaction -= stepDt * (absoluteError * 0.0003);
+          }
+
+          if (currentSatisfaction > 1.0) currentSatisfaction = 1.0;
+          if (currentSatisfaction < 0.0) currentSatisfaction = 0.0;
+
+          zoneSatisfaction[zId] = currentSatisfaction;
         }
       }
 
@@ -213,14 +254,14 @@ class SimulationWorkerState {
         final double currentTemp = temps[i];
         final int matIndex = materials[i];
 
-        if (matIndex == gm.MaterialType.heater.index && heatersOn[i] == 1) {
-          nextTemps[i] = 60.0;
-          continue;
-        }
-
-        if (matIndex == gm.MaterialType.air.index) {
-          nextTemps[i] = cmd.outdoorTemp;
-          continue;
+        if (matIndex == gm.MaterialType.heater.index) {
+          final targetHeaterTemp = heaterTargetTemps[i];
+          if (targetHeaterTemp > 0.0) {
+            nextTemps[i] = targetHeaterTemp;
+            continue;
+          }
+          // Pokud je targetHeaterTemp == 0.0, radiátor je vypnutý.
+          // Pokračujeme běžným fyzikálním výpočtem, aby radiátor postupně přirozeně zchladl.
         }
 
         final double myCond = conds[matIndex];
@@ -280,7 +321,10 @@ class SimulationWorkerState {
       nextTemps = tmp;
     }
 
-    // Vrátíme kopii pole jako Float64List pro UI
-    return WorkerResponse(Float64List.fromList(temps));
+    // Vrátíme zkopírovaná pole pro UI
+    return WorkerResponse(
+      Float64List.fromList(temps),
+      Map<int, double>.from(zoneSatisfaction),
+    );
   }
 }

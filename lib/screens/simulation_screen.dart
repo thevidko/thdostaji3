@@ -328,6 +328,44 @@ class _SimulationScreenState extends State<SimulationScreen> {
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  // METRIKA SPOKOJENOSTI
+                  Text(
+                    'Spokojenost s teplotou',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  ListenableBuilder(
+                    listenable: gridModel,
+                    builder: (context, _) {
+                      final satisfaction = gridModel.getZoneSatisfaction(
+                        zoneId,
+                      );
+                      final percent = (satisfaction * 100).toInt();
+
+                      Color meterColor = Colors.green;
+                      if (satisfaction < 0.4) {
+                        meterColor = Colors.red;
+                      } else if (satisfaction < 0.7) {
+                        meterColor = Colors.orange;
+                      }
+
+                      return Column(
+                        children: [
+                          LinearProgressIndicator(
+                            value: satisfaction,
+                            minHeight: 12,
+                            backgroundColor: Colors.grey.shade300,
+                            color: meterColor,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          const SizedBox(height: 4),
+                          Text('$percent %'),
+                        ],
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 24),
+                  // NASTAVENÍ TEPLOTY
                   Text('Cílová teplota: ${currentTemp.toStringAsFixed(1)}°C'),
                   Slider(
                     value: currentTemp,
