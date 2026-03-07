@@ -98,6 +98,13 @@ class SimulationWorkerState {
   final List<double> conds;
   final List<double> caps;
 
+  // Konstanta vodivosti zdroje radiátoru — sdílená mezi fyzikálním výpočtem a stabilitní analýzou.
+  static const double heaterSourceConductance = 500.0;
+
+  // Maximální stabilní dt odvozený z parametrů materiálů (CFL podmínka pro explicitní schéma).
+  // Přepočítá se při každé změně parametrů materiálů.
+  late double _dtThreshold;
+
   SimulationWorkerState(WorkerInitCommand initCmd)
     : size = initCmd.size,
       temps = initCmd.initialTemps,
@@ -127,6 +134,24 @@ class SimulationWorkerState {
     caps[gm.MaterialType.insulation.index] = 5.0 * m;
     caps[gm.MaterialType.heater.index] = 10.0 * m;
     caps[gm.MaterialType.thermostat.index] = 0.5 * m;
+
+    // Odvodit maximální stabilní dt z parametrů materiálů.
+    // CFL podmínka pro explicitní FD schéma (4 sousedé):
+    //   dt_max(m) = cap[m] / (4 * cond_eff[m])
+    // kde cond_eff zahrnuje i zdroj radiátoru pro buňky typu heater.
+    // Globální dtThreshold = min přes všechny materiály, s bezpečnostním faktorem 0.9.
+    double minDt = double.infinity;
+    for (int m = 0; m < conds.length; m++) {
+      double effectiveCond = 4.0 * conds[m];
+      if (m == gm.MaterialType.heater.index) {
+        effectiveCond += heaterSourceConductance;
+      }
+      if (effectiveCond > 0) {
+        final double dtMax = caps[m] / effectiveCond;
+        if (dtMax < minDt) minDt = dtMax;
+      }
+    }
+    _dtThreshold = minDt * 0.9; // Bezpečnostní faktor 0.9 pro numerický klid
   }
 
   void updateMap(WorkerUpdateMapCommand cmd) {
@@ -173,8 +198,8 @@ class SimulationWorkerState {
   }
 
   WorkerResponse step(WorkerStepCommand cmd) {
-    // Fyzikální práh kroku: čím menší, tím přesnější
-    double dtThreshold = 2.0;
+    // Fyzikální práh kroku odvozený z CFL podmínky materiálových parametrů.
+    final double dtThreshold = _dtThreshold;
 
     // Pokud uživatel nasadí obrovské zrychlení (Den/s, Týden/s), snížíme zátěž na frame (maxStepsPerFrame),
     // tím se rychlost de-facto limituje maximální kapacitou procesoru, ale nezačne lagovat!
@@ -185,7 +210,16 @@ class SimulationWorkerState {
     if (steps > maxStepsPerFrame) {
       steps = maxStepsPerFrame;
     }
-    final double stepDt = cmd.virtualDtSec / steps;
+    // stepDt nesmí překročit dtThreshold — jinak explicitní schéma diverguje do NaN.
+    // Pokud maxStepsPerFrame nestačí, zkrátíme simulovaný čas framu (vizuálně pomalejší
+    // při extrémních násobcích, ale numericky stabilní).
+    final double effectiveVirtualDt =
+        (steps * dtThreshold).clamp(0.0, cmd.virtualDtSec);
+    final double stepDt = effectiveVirtualDt / steps;
+    // Reálný čas na jeden sub-krok — nezávislý na timeMultiplier.
+    // virtualDtSec / timeMultiplier ≈ 0.033s (délka reálného framu),
+    // děleno počtem sub-kroků dává reálný čas každé iterace.
+    final double realStepDt = effectiveVirtualDt / (cmd.timeMultiplier * steps);
 
     final int length = size * size;
 
@@ -234,12 +268,11 @@ class SimulationWorkerState {
           final double absoluteError = diff.abs();
 
           if (absoluteError <= 0.5) {
-            // Mírně připočítáme regeneraci spokojenosti (0.5% za reálnou 1 vteřinu)
-            currentSatisfaction += stepDt * 0.005;
+            // Regenerace spokojenosti: 0.5% za reálnou vteřinu (nezávisle na rychlosti simulace)
+            currentSatisfaction += realStepDt * 0.005;
           } else {
-            // Odečteme nespokojenost: např. chyba 3°C propálí 10% za zhruba reálnou minutu
-            // Vynásobíme dtSec a penalizačním koeficientem umocněným chybou
-            currentSatisfaction -= stepDt * (absoluteError * 0.0003);
+            // Penalizace: chyba 3°C propálí ~10% za reálnou minutu (nezávisle na rychlosti simulace)
+            currentSatisfaction -= realStepDt * (absoluteError * 0.0003);
           }
 
           if (currentSatisfaction > 1.0) currentSatisfaction = 1.0;
@@ -254,16 +287,6 @@ class SimulationWorkerState {
         final double currentTemp = temps[i];
         final int matIndex = materials[i];
 
-        if (matIndex == gm.MaterialType.heater.index) {
-          final targetHeaterTemp = heaterTargetTemps[i];
-          if (targetHeaterTemp > 0.0) {
-            nextTemps[i] = targetHeaterTemp;
-            continue;
-          }
-          // Pokud je targetHeaterTemp == 0.0, radiátor je vypnutý.
-          // Pokračujeme běžným fyzikálním výpočtem, aby radiátor postupně přirozeně zchladl.
-        }
-
         final double myCond = conds[matIndex];
         final double myCap = caps[matIndex];
         double totalFlux = 0.0;
@@ -277,8 +300,11 @@ class SimulationWorkerState {
           final double c = (myCond < neighborCond) ? myCond : neighborCond;
           totalFlux += (temps[i + 1] - currentTemp) * c;
         } else {
-          totalFlux +=
-              (cmd.outdoorTemp - currentTemp) * ((myCond < 1.0) ? myCond : 1.0);
+          // Hranice gridu = kontakt s venkovním prostředím.
+          // Použijeme myCond přímo (bez capu), aby vzduch na okraji rychle přebíral
+          // venkovní teplotu — konzistentní s interní difúzí.
+          // Stabilita zaručena dtThreshold z CFL podmínky.
+          totalFlux += (cmd.outdoorTemp - currentTemp) * myCond;
         }
 
         // Doleva (-1)
@@ -287,8 +313,7 @@ class SimulationWorkerState {
           final double c = (myCond < neighborCond) ? myCond : neighborCond;
           totalFlux += (temps[i - 1] - currentTemp) * c;
         } else {
-          totalFlux +=
-              (cmd.outdoorTemp - currentTemp) * ((myCond < 1.0) ? myCond : 1.0);
+          totalFlux += (cmd.outdoorTemp - currentTemp) * myCond;
         }
 
         // Dolů (+size)
@@ -297,8 +322,7 @@ class SimulationWorkerState {
           final double c = (myCond < neighborCond) ? myCond : neighborCond;
           totalFlux += (temps[i + size] - currentTemp) * c;
         } else {
-          totalFlux +=
-              (cmd.outdoorTemp - currentTemp) * ((myCond < 1.0) ? myCond : 1.0);
+          totalFlux += (cmd.outdoorTemp - currentTemp) * myCond;
         }
 
         // Nahoru (-size)
@@ -307,11 +331,23 @@ class SimulationWorkerState {
           final double c = (myCond < neighborCond) ? myCond : neighborCond;
           totalFlux += (temps[i - size] - currentTemp) * c;
         } else {
-          totalFlux +=
-              (cmd.outdoorTemp - currentTemp) * ((myCond < 1.0) ? myCond : 1.0);
+          totalFlux += (cmd.outdoorTemp - currentTemp) * myCond;
         }
 
-        // Fyzikální výpočet posunu tepla bez jakékoliv nebezpečné tolerance.
+        // Zdroj tepla pro radiátor: fyzikálně korektní vstup energie přes
+        // proporcionální tok do tepelného rezervoáru (namísto tvrdého clampování teploty).
+        // Energie vstupuje postupně — zachování energie je zachováno.
+        // Stabilita: heaterSourceConductance * stepDt / myCap = 500 * 2 / 10000 = 0.1 < 1 ✓
+        if (matIndex == gm.MaterialType.heater.index) {
+          final double targetHeaterTemp = heaterTargetTemps[i];
+          if (targetHeaterTemp > 0.0) {
+            totalFlux +=
+                heaterSourceConductance * (targetHeaterTemp - currentTemp);
+          }
+          // Pokud je targetHeaterTemp == 0.0, radiátor je vypnutý a přirozeně chladne difúzí.
+        }
+
+        // Fyzikální výpočet posunu tepla.
         nextTemps[i] = currentTemp + (totalFlux * stepDt / myCap);
       }
 
