@@ -96,27 +96,79 @@ class GridModel extends ChangeNotifier {
     }
   }
 
-  Map<int, double> get zoneEnergyConsumed => _zoneEnergyConsumed;
   Map<int, double> get zoneInstantPower => _zoneInstantPower;
 
-  double getZoneEnergyConsumed(int zoneId) =>
-      _zoneEnergyConsumed[zoneId] ?? 0.0;
+  // Baseline pro reset — worker akumuluje dál, UI odečítá snapshot z doby resetu.
+  final Map<int, double> _zoneEnergyBaseline = {};
+  final Map<String, double> _interZoneFlowBaseline = {};
+  // Surová kumulativní data z workeru (bez odečtení baseline)
+  final Map<String, double> _interZoneFlow = {};
+
+  /// Energie dodaná radiátory do zóny od posledního resetu [sim. J]
+  double getZoneEnergyConsumed(int zoneId) {
+    final raw = _zoneEnergyConsumed[zoneId] ?? 0.0;
+    final baseline = _zoneEnergyBaseline[zoneId] ?? 0.0;
+    return (raw - baseline).clamp(0.0, double.infinity);
+  }
 
   double getZoneInstantPower(int zoneId) => _zoneInstantPower[zoneId] ?? 0.0;
+
+  /// Teplo přenesené z [fromZone] do [toZone] od posledního resetu [sim. J]
+  double getInterZoneFlow(int fromZone, int toZone) {
+    final key = '$fromZone,$toZone';
+    final raw = _interZoneFlow[key] ?? 0.0;
+    final baseline = _interZoneFlowBaseline[key] ?? 0.0;
+    return (raw - baseline).clamp(0.0, double.infinity);
+  }
+
+  /// Všechny zóny, které poslaly teplo do [zoneId], s množstvím [sim. J]
+  Map<int, double> getZoneInflows(int zoneId) {
+    final result = <int, double>{};
+    for (final entry in _interZoneFlow.entries) {
+      final sep = entry.key.indexOf(',');
+      final from = int.parse(entry.key.substring(0, sep));
+      final to = int.parse(entry.key.substring(sep + 1));
+      if (to != zoneId) continue;
+      final baseline = _interZoneFlowBaseline[entry.key] ?? 0.0;
+      final net = (entry.value - baseline).clamp(0.0, double.infinity);
+      if (net > 0) result[from] = net;
+    }
+    return result;
+  }
+
+  /// Všechny zóny, do kterých [zoneId] poslalo teplo, s množstvím [sim. J]
+  Map<int, double> getZoneOutflows(int zoneId) {
+    final result = <int, double>{};
+    for (final entry in _interZoneFlow.entries) {
+      final sep = entry.key.indexOf(',');
+      final from = int.parse(entry.key.substring(0, sep));
+      final to = int.parse(entry.key.substring(sep + 1));
+      if (from != zoneId) continue;
+      final baseline = _interZoneFlowBaseline[entry.key] ?? 0.0;
+      final net = (entry.value - baseline).clamp(0.0, double.infinity);
+      if (net > 0) result[to] = net;
+    }
+    return result;
+  }
 
   void updateZoneEnergy(
     Map<int, double> energy,
     Map<int, double> power,
+    Map<String, double> interFlow,
   ) {
     _zoneEnergyConsumed.addAll(energy);
     _zoneInstantPower
       ..clear()
       ..addAll(power);
+    _interZoneFlow
+      ..clear()
+      ..addAll(interFlow);
   }
 
+  /// Vynuluje měřiče energie (uloží baseline — worker akumuluje dál).
   void resetZoneEnergy() {
-    _zoneEnergyConsumed.clear();
-    _zoneInstantPower.clear();
+    _zoneEnergyBaseline.addAll(_zoneEnergyConsumed);
+    _interZoneFlowBaseline.addAll(_interZoneFlow);
     notifyListeners();
   }
 

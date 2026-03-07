@@ -397,6 +397,50 @@ class _SimulationScreenState extends State<SimulationScreen> {
                     const Divider(),
                     const SizedBox(height: 8),
 
+                    // TEPELNÁ VÝMĚNA SE SOUSEDY
+                    const Text(
+                      'Tepelná výměna se sousedy',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    ListenableBuilder(
+                      listenable: gridModel,
+                      builder: (context, _) {
+                        final inflows = gridModel.getZoneInflows(zoneId);
+                        final outflows = gridModel.getZoneOutflows(zoneId);
+                        if (inflows.isEmpty && outflows.isEmpty) {
+                          return Text(
+                            'Žádná data (simulace ještě neběžela nebo zóna nemá sousedy).',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          );
+                        }
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            ...inflows.entries.map(
+                              (e) => _FlowRow(
+                                fromZone: e.key,
+                                toZone: zoneId,
+                                energy: e.value,
+                                isInflow: true,
+                              ),
+                            ),
+                            ...outflows.entries.map(
+                              (e) => _FlowRow(
+                                fromZone: zoneId,
+                                toZone: e.key,
+                                energy: e.value,
+                                isInflow: false,
+                              ),
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 8),
+                    const Divider(),
+                    const SizedBox(height: 8),
+
                     // NASTAVENÍ TEPLOTY
                     Text('Cílová teplota: ${currentTemp.toStringAsFixed(1)}°C'),
                     Slider(
@@ -519,6 +563,59 @@ class _MetricTile extends StatelessWidget {
           Text(
             label,
             style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Jeden řádek tepelného toku mezi dvěma zónami.
+class _FlowRow extends StatelessWidget {
+  final int fromZone;
+  final int toZone;
+  final double energy;
+  final bool isInflow;
+
+  const _FlowRow({
+    required this.fromZone,
+    required this.toZone,
+    required this.energy,
+    required this.isInflow,
+  });
+
+  String _fmt(double e) {
+    if (e < 1e6) return '${e.toStringAsFixed(0)} J';
+    if (e < 1e9) return '${(e / 1e6).toStringAsFixed(2)} MJ';
+    return '${(e / 1e9).toStringAsFixed(2)} GJ';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    // Příjem = zelená (zóna dostává teplo zadarmo), odeslání = oranžová (zóna přichází o teplo)
+    final color = isInflow ? colors.tertiary : colors.error;
+    final icon = isInflow ? Icons.arrow_downward : Icons.arrow_upward;
+    final label = isInflow
+        ? '← Ze zóny #$fromZone'
+        : '→ Do zóny #$toZone';
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: [
+          Icon(icon, size: 14, color: color),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(label, style: Theme.of(context).textTheme.bodySmall),
+          ),
+          Text(
+            _fmt(energy),
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 12,
+              color: color,
+            ),
           ),
         ],
       ),

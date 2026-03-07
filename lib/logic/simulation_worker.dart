@@ -60,11 +60,15 @@ class WorkerResponse {
   final Map<int, double> zoneEnergyConsumed;
   // Okamžitý výkon radiátorů v každé zóně za poslední frame [sim. W]
   final Map<int, double> zoneInstantPower;
+  // Kumulativní tok tepla přes hranice mezi zónami.
+  // Klíč: "$fromZoneId,$toZoneId", hodnota: [sim. J] přenesená z from→to.
+  final Map<String, double> interZoneFlow;
   WorkerResponse(
     this.temps,
     this.zoneSatisfaction,
     this.zoneEnergyConsumed,
     this.zoneInstantPower,
+    this.interZoneFlow,
   );
 }
 
@@ -103,10 +107,16 @@ class SimulationWorkerState {
   Map<int, double> zoneEnergyConsumed = {};
   // Okamžitý výkon radiátorů per zóna za aktuální frame [sim. W]
   Map<int, double> zoneInstantPower = {};
+  // Kumulativní tok tepla přes hranice zón. Klíč: "$fromZone,$toZone"
+  Map<String, double> interZoneFlow = {};
 
   // Precalculated O(n) maps pro O(1) přístupy do radiátorů
   final Map<int, List<int>> zoneThermostats = {};
   final Map<int, List<int>> zoneHeaters = {};
+  // Předpočítané cross-zone boundary edges (přímé i přes mezistěnu).
+  // Každý prvek: (index i, index j, zóna A, zóna B, effectiveCond)
+  // Přímé hrany: min(condA, condB). Přes mezistěnu: harmonický průměr sériových odporů.
+  List<(int, int, int, int, double)> _boundaryEdges = [];
 
   final List<double> conds;
   final List<double> caps;
@@ -196,18 +206,83 @@ class SimulationWorkerState {
     }
 
     final int length = size * size;
+    final List<(int, int, int, int, double)> edges = [];
+    // Dedup set: zabraňuje přidání stejné (i,j) hrany vícekrát přes různé mezistěny
+    final Set<int> addedPairs = {};
+
+    void addEdge(int i, int j, int zA, int zB, double c) {
+      // Klíč: vždy min→max index pro konzistentní dedup
+      final int key = i < j ? i * 1000000 + j : j * 1000000 + i;
+      if (addedPairs.add(key)) edges.add((i, j, zA, zB, c));
+    }
+
     for (int i = 0; i < length; i++) {
       final int mIdx = materials[i];
-      final int zId = zoneIds[i];
+      final int zA = zoneIds[i];
 
-      if (zId != 0) {
+      if (zA != 0) {
         if (mIdx == gm.MaterialType.thermostat.index) {
-          zoneThermostats.putIfAbsent(zId, () => []).add(i);
+          zoneThermostats.putIfAbsent(zA, () => []).add(i);
         } else if (mIdx == gm.MaterialType.heater.index) {
-          zoneHeaters.putIfAbsent(zId, () => []).add(i);
+          zoneHeaters.putIfAbsent(zA, () => []).add(i);
+        }
+
+        // Přímé zóna-zóna hranice (doprava/dolů, bez duplicit)
+        final int x = i % size;
+        final int y = i ~/ size;
+        if (x + 1 < size) {
+          final int zB = zoneIds[i + 1];
+          if (zB != 0 && zA != zB) {
+            final double c = conds[mIdx] < conds[materials[i + 1]]
+                ? conds[mIdx]
+                : conds[materials[i + 1]];
+            addEdge(i, i + 1, zA, zB, c);
+          }
+        }
+        if (y + 1 < size) {
+          final int zB = zoneIds[i + size];
+          if (zB != 0 && zA != zB) {
+            final double c = conds[mIdx] < conds[materials[i + size]]
+                ? conds[mIdx]
+                : conds[materials[i + size]];
+            addEdge(i, i + size, zA, zB, c);
+          }
+        }
+      } else {
+        // Mezistěna (non-zone cell) — hledáme zóny na obou stranách.
+        // Typický případ: [byt A][zeď][byt B]
+        // Soubíráme sousední zone buňky ze všech 4 směrů.
+        final int x = i % size;
+        final int y = i ~/ size;
+        final List<int> znIdxs = []; // indexy sousedních zone buněk
+        if (x + 1 < size && zoneIds[i + 1] != 0) znIdxs.add(i + 1);
+        if (x - 1 >= 0 && zoneIds[i - 1] != 0) znIdxs.add(i - 1);
+        if (y + 1 < size && zoneIds[i + size] != 0) znIdxs.add(i + size);
+        if (y - 1 >= 0 && zoneIds[i - size] != 0) znIdxs.add(i - size);
+
+        // Pro každý pár zone-buněk na různých stranách mezistěny vytvoříme hranu
+        for (int a = 0; a < znIdxs.length; a++) {
+          for (int b = a + 1; b < znIdxs.length; b++) {
+            final int ia = znIdxs[a];
+            final int ib = znIdxs[b];
+            final int zA2 = zoneIds[ia];
+            final int zB2 = zoneIds[ib];
+            if (zA2 == zB2) continue;
+            // Efektivní vodivost přes sériové odpory: cA→wall a wall→cB
+            final double ca = conds[materials[ia]];
+            final double cm = conds[mIdx]; // mezistěna
+            final double cb = conds[materials[ib]];
+            final double c1 = ca < cm ? ca : cm;
+            final double c2 = cm < cb ? cm : cb;
+            // Sériová kombinace (harmonický průměr)
+            final double cEff = (c1 * c2) / (c1 + c2);
+            addEdge(ia, ib, zA2, zB2, cEff);
+          }
         }
       }
     }
+
+    _boundaryEdges = edges;
   }
 
   WorkerResponse step(WorkerStepCommand cmd) {
@@ -381,6 +456,20 @@ class SimulationWorkerState {
         nextTemps[i] = currentTemp + (totalFlux * stepDt / myCap);
       }
 
+      // Tepelný tok přes cross-zone hranice (přímé i přes mezistěnu).
+      // effectiveCond je předpočítána v _rebuildZoneLookups.
+      for (final (i, j, zA, zB, cEff) in _boundaryEdges) {
+        // flux > 0 → teplo teče z j (zB) do i (zA); flux < 0 → z i (zA) do j (zB)
+        final double energy = cEff * (temps[j] - temps[i]) * stepDt;
+        if (energy > 0) {
+          final String key = '$zB,$zA';
+          interZoneFlow[key] = (interZoneFlow[key] ?? 0.0) + energy;
+        } else if (energy < 0) {
+          final String key = '$zA,$zB';
+          interZoneFlow[key] = (interZoneFlow[key] ?? 0.0) - energy;
+        }
+      }
+
       // Pointer Swap (Žádný foreach pro kopírování přes celou paměť)
       final Float64List tmp = temps;
       temps = nextTemps;
@@ -393,6 +482,7 @@ class SimulationWorkerState {
       Map<int, double>.from(zoneSatisfaction),
       Map<int, double>.from(zoneEnergyConsumed),
       Map<int, double>.from(zoneInstantPower),
+      Map<String, double>.from(interZoneFlow),
     );
   }
 }
