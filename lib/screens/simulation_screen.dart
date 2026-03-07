@@ -325,61 +325,94 @@ class _SimulationScreenState extends State<SimulationScreen> {
           builder: (context, setState) {
             return AlertDialog(
               title: Text('Nastavení Zóny #$zoneId'),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // METRIKA SPOKOJENOSTI
-                  Text(
-                    'Spokojenost s teplotou',
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  ListenableBuilder(
-                    listenable: gridModel,
-                    builder: (context, _) {
-                      final satisfaction = gridModel.getZoneSatisfaction(
-                        zoneId,
-                      );
-                      final percent = (satisfaction * 100).toInt();
+              content: SizedBox(
+                width: 340,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // METRIKA SPOKOJENOSTI
+                    const Text(
+                      'Spokojenost s teplotou',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    ListenableBuilder(
+                      listenable: gridModel,
+                      builder: (context, _) {
+                        final satisfaction = gridModel.getZoneSatisfaction(zoneId);
+                        final percent = (satisfaction * 100).toInt();
+                        Color meterColor = Colors.green;
+                        if (satisfaction < 0.4) {
+                          meterColor = Colors.red;
+                        } else if (satisfaction < 0.7) {
+                          meterColor = Colors.orange;
+                        }
+                        return Column(
+                          children: [
+                            LinearProgressIndicator(
+                              value: satisfaction,
+                              minHeight: 12,
+                              backgroundColor: Colors.grey.shade300,
+                              color: meterColor,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            const SizedBox(height: 4),
+                            Text('$percent %'),
+                          ],
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 20),
+                    const Divider(),
+                    const SizedBox(height: 8),
 
-                      Color meterColor = Colors.green;
-                      if (satisfaction < 0.4) {
-                        meterColor = Colors.red;
-                      } else if (satisfaction < 0.7) {
-                        meterColor = Colors.orange;
-                      }
+                    // ENERGETICKÉ METRIKY
+                    const Text(
+                      'Spotřeba tepelné energie',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 10),
+                    ListenableBuilder(
+                      listenable: gridModel,
+                      builder: (context, _) {
+                        final energy = gridModel.getZoneEnergyConsumed(zoneId);
+                        final power = gridModel.getZoneInstantPower(zoneId);
+                        return _EnergyMetricsCard(energy: energy, power: power);
+                      },
+                    ),
+                    const SizedBox(height: 4),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton.icon(
+                        onPressed: () => gridModel.resetZoneEnergy(),
+                        icon: const Icon(Icons.restart_alt, size: 16),
+                        label: const Text('Resetovat měřič'),
+                        style: TextButton.styleFrom(
+                          foregroundColor: Colors.orange,
+                          visualDensity: VisualDensity.compact,
+                        ),
+                      ),
+                    ),
+                    const Divider(),
+                    const SizedBox(height: 8),
 
-                      return Column(
-                        children: [
-                          LinearProgressIndicator(
-                            value: satisfaction,
-                            minHeight: 12,
-                            backgroundColor: Colors.grey.shade300,
-                            color: meterColor,
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          const SizedBox(height: 4),
-                          Text('$percent %'),
-                        ],
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 24),
-                  // NASTAVENÍ TEPLOTY
-                  Text('Cílová teplota: ${currentTemp.toStringAsFixed(1)}°C'),
-                  Slider(
-                    value: currentTemp,
-                    min: 15,
-                    max: 30,
-                    divisions: 30,
-                    label: currentTemp.toStringAsFixed(1),
-                    onChanged: (val) {
-                      setState(() {
-                        currentTemp = val;
-                      });
-                    },
-                  ),
-                ],
+                    // NASTAVENÍ TEPLOTY
+                    Text('Cílová teplota: ${currentTemp.toStringAsFixed(1)}°C'),
+                    Slider(
+                      value: currentTemp,
+                      min: 15,
+                      max: 30,
+                      divisions: 30,
+                      label: currentTemp.toStringAsFixed(1),
+                      onChanged: (val) {
+                        setState(() {
+                          currentTemp = val;
+                        });
+                      },
+                    ),
+                  ],
+                ),
               ),
               actions: [
                 TextButton(
@@ -398,6 +431,97 @@ class _SimulationScreenState extends State<SimulationScreen> {
           },
         );
       },
+    );
+  }
+}
+
+/// Karta s energetickými metrikami zóny.
+/// Formátuje surová simulační čísla do čitelných jednotek.
+class _EnergyMetricsCard extends StatelessWidget {
+  final double energy;
+  final double power;
+
+  const _EnergyMetricsCard({required this.energy, required this.power});
+
+  String _formatEnergy(double e) {
+    if (e < 1e6) return '${e.toStringAsFixed(0)} J';
+    if (e < 1e9) return '${(e / 1e6).toStringAsFixed(2)} MJ';
+    return '${(e / 1e9).toStringAsFixed(2)} GJ';
+  }
+
+  String _formatPower(double p) {
+    if (p < 1e3) return '${p.toStringAsFixed(0)} W';
+    return '${(p / 1e3).toStringAsFixed(2)} kW';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Row(
+      children: [
+        Expanded(
+          child: _MetricTile(
+            icon: Icons.bolt,
+            label: 'Okamžitý výkon',
+            value: _formatPower(power),
+            color: colorScheme.error,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _MetricTile(
+            icon: Icons.local_fire_department,
+            label: 'Celková energie',
+            value: _formatEnergy(energy),
+            color: colorScheme.primary,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _MetricTile extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+  final Color color;
+
+  const _MetricTile({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 18, color: color),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 14,
+              color: color,
+            ),
+          ),
+          Text(
+            label,
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ],
+      ),
     );
   }
 }

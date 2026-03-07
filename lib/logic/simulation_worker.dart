@@ -56,7 +56,16 @@ class WorkerStepCommand {
 class WorkerResponse {
   final Float64List temps;
   final Map<int, double> zoneSatisfaction;
-  WorkerResponse(this.temps, this.zoneSatisfaction);
+  // Kumulativní tepelná energie dodaná radiátory do každé zóny [sim. J]
+  final Map<int, double> zoneEnergyConsumed;
+  // Okamžitý výkon radiátorů v každé zóně za poslední frame [sim. W]
+  final Map<int, double> zoneInstantPower;
+  WorkerResponse(
+    this.temps,
+    this.zoneSatisfaction,
+    this.zoneEnergyConsumed,
+    this.zoneInstantPower,
+  );
 }
 
 // --- Izolát ---
@@ -90,6 +99,10 @@ class SimulationWorkerState {
   Int32List zoneIds;
   Map<int, double> zoneTargetTemps;
   Map<int, double> zoneSatisfaction = {};
+  // Kumulativní energie dodaná radiátory per zóna od spuštění simulace [sim. J]
+  Map<int, double> zoneEnergyConsumed = {};
+  // Okamžitý výkon radiátorů per zóna za aktuální frame [sim. W]
+  Map<int, double> zoneInstantPower = {};
 
   // Precalculated O(n) maps pro O(1) přístupy do radiátorů
   final Map<int, List<int>> zoneThermostats = {};
@@ -282,6 +295,9 @@ class SimulationWorkerState {
         }
       }
 
+      // Reset okamžitého výkonu na začátku každého sub-kroku (průměruje se přes frame)
+      if (step == 0) zoneInstantPower.clear();
+
       // 2. Samotná zploštěná 1D fyzika (mnohem rychlejší Cache access)
       for (int i = 0; i < length; i++) {
         final double currentTemp = temps[i];
@@ -341,8 +357,22 @@ class SimulationWorkerState {
         if (matIndex == gm.MaterialType.heater.index) {
           final double targetHeaterTemp = heaterTargetTemps[i];
           if (targetHeaterTemp > 0.0) {
-            totalFlux +=
+            final double power =
                 heaterSourceConductance * (targetHeaterTemp - currentTemp);
+            totalFlux += power;
+
+            // Akumulace energie a výkonu per zóna — pouze kladný výkon.
+            // Záporný power nastane když je currentTemp > targetHeaterTemp
+            // (radiátor se chladí zpět — fyzikálně správné, ale není to spotřeba energie).
+            if (power > 0.0) {
+              final int zId = zoneIds[i];
+              if (zId != 0) {
+                zoneEnergyConsumed[zId] =
+                    (zoneEnergyConsumed[zId] ?? 0.0) + power * stepDt;
+                zoneInstantPower[zId] =
+                    (zoneInstantPower[zId] ?? 0.0) + power;
+              }
+            }
           }
           // Pokud je targetHeaterTemp == 0.0, radiátor je vypnutý a přirozeně chladne difúzí.
         }
@@ -361,6 +391,8 @@ class SimulationWorkerState {
     return WorkerResponse(
       Float64List.fromList(temps),
       Map<int, double>.from(zoneSatisfaction),
+      Map<int, double>.from(zoneEnergyConsumed),
+      Map<int, double>.from(zoneInstantPower),
     );
   }
 }

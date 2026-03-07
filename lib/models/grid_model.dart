@@ -47,6 +47,10 @@ class GridModel extends ChangeNotifier {
   final Map<int, double> _zoneTargetTemps = {};
   // Kumulativní hodnota spokojenosti 0.0 - 1.0 (0% až 100%)
   final Map<int, double> _zoneSatisfaction = {};
+  // Kumulativní tepelná energie dodaná radiátory per zóna [sim. J]
+  final Map<int, double> _zoneEnergyConsumed = {};
+  // Okamžitý výkon radiátorů per zóna [sim. W]
+  final Map<int, double> _zoneInstantPower = {};
 
   GridModel(int size)
     : _gridSize = size,
@@ -90,6 +94,30 @@ class GridModel extends ChangeNotifier {
     for (final entry in newSatisfactions.entries) {
       _zoneSatisfaction[entry.key] = entry.value;
     }
+  }
+
+  Map<int, double> get zoneEnergyConsumed => _zoneEnergyConsumed;
+  Map<int, double> get zoneInstantPower => _zoneInstantPower;
+
+  double getZoneEnergyConsumed(int zoneId) =>
+      _zoneEnergyConsumed[zoneId] ?? 0.0;
+
+  double getZoneInstantPower(int zoneId) => _zoneInstantPower[zoneId] ?? 0.0;
+
+  void updateZoneEnergy(
+    Map<int, double> energy,
+    Map<int, double> power,
+  ) {
+    _zoneEnergyConsumed.addAll(energy);
+    _zoneInstantPower
+      ..clear()
+      ..addAll(power);
+  }
+
+  void resetZoneEnergy() {
+    _zoneEnergyConsumed.clear();
+    _zoneInstantPower.clear();
+    notifyListeners();
   }
 
   int getZoneId(int x, int y) {

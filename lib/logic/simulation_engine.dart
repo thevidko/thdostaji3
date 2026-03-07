@@ -141,6 +141,7 @@ class SimulationEngine extends ChangeNotifier {
     _isUpdatingFromWorker = true;
     gridModel.updateTemperatures(temps2D);
     gridModel.updateZoneSatisfactions(response.zoneSatisfaction);
+    gridModel.updateZoneEnergy(response.zoneEnergyConsumed, response.zoneInstantPower);
     gridModel.notifyListeners();
     _isUpdatingFromWorker = false;
 
